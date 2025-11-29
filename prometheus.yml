@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'voiceflow-dev'
+    environment: 'development'
+
+scrape_configs:
+  # Python ML Service
+  - job_name: 'ml-service'
+    static_configs:
+      - targets: ['ml-service:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # Rust Inference Engine
+  - job_name: 'inference-engine'
+    static_configs:
+      - targets: ['inference-engine:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s  # More frequent for real-time metrics
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+# Alerting rules (optional)
+rule_files:
+  # - 'alerts/*.yml'
+
+# Alert manager configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']

@@ -1,0 +1,150 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: voiceflow-postgres
+    environment:
+      POSTGRES_USER: voiceflow
+      POSTGRES_PASSWORD: voiceflow_password
+      POSTGRES_DB: voiceflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voiceflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voiceflow-network
+
+  # Redis Cache
+  redis:
+    image: redis:7.2-alpine
+    container_name: voiceflow-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voiceflow-network
+
+  # Python ML Service
+  ml-service:
+    build:
+      context: ./voiceflow-ml
+      dockerfile: Dockerfile
+    container_name: voiceflow-ml-service
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=voiceflow
+      - POSTGRES_PASSWORD=voiceflow_password
+      - POSTGRES_DB=voiceflow
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RUST_SERVICE_URL=http://inference-engine:3000
+      - DEBUG=false
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/models
+      - ./data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - voiceflow-network
+    restart: unless-stopped
+
+  # Rust Inference Engine
+  inference-engine:
+    build:
+      context: ./voiceflow-inference
+      dockerfile: Dockerfile
+    container_name: voiceflow-inference-engine
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3000
+      - MODELS_DIR=/models
+      - INFERENCE_THREADS=4
+      - OPTIMIZATION_LEVEL=Level3
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./models:/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - voiceflow-network
+    restart: unless-stopped
+
+  # Prometheus Metrics
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: voiceflow-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - ml-service
+      - inference-engine
+    networks:
+      - voiceflow-network
+    restart: unless-stopped
+
+  # Grafana Dashboards
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: voiceflow-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - voiceflow-network
+    restart: unless-stopped
+
+networks:
+  voiceflow-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
