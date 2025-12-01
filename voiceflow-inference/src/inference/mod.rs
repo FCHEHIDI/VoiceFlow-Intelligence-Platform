@@ -30,6 +30,12 @@ impl ModelRunner {
             .map_err(|e| AppError::ModelLoadError(e.to_string()))?
             .with_intra_threads(4)
             .map_err(|e| AppError::ModelLoadError(e.to_string()))?
+            // Enable GPU if available (CUDA/DirectML), fallback to CPU
+            .with_execution_providers([
+                ort::CUDAExecutionProvider::default().build(),
+                ort::CPUExecutionProvider::default().build(),
+            ])
+            .map_err(|e| AppError::ModelLoadError(e.to_string()))?
             .commit_from_file(path)
             .map_err(|e| AppError::ModelLoadError(e.to_string()))?;
         
@@ -44,24 +50,37 @@ impl ModelRunner {
         })
     }
 
-    /// Run inference on audio features
-    pub fn run_inference(&self, features: &[f32]) -> AppResult<Vec<f32>> {
+    /// Run inference on raw audio samples
+    /// 
+    /// Input: audio samples (16kHz mono, f32)
+    /// Output: speaker probabilities [speaker_1, speaker_2]
+    pub fn run_inference(&self, audio: &[f32]) -> AppResult<Vec<f32>> {
         let start = Instant::now();
         
-        // Prepare input tensor (stub - actual shape depends on model)
-        // Expected shape: [batch_size, channels, time_steps, n_mfcc]
-        let input_shape = [1, 1, 100, 40];
+        // Transformer model expects: [batch_size, audio_length]
+        // Input shape: [1, audio.len()]
+        let batch_size = 1;
+        let audio_length = audio.len();
         
-        // Create ONNX tensor
-        let input_tensor = Value::from_array(self.session.allocator(), &features)
+        info!("Running inference on {} samples ({:.2}s audio)", 
+              audio_length, audio_length as f32 / 16000.0);
+        
+        // Create input tensor
+        use ndarray::Array2;
+        let input_array = Array2::from_shape_vec(
+            (batch_size, audio_length),
+            audio.to_vec()
+        ).map_err(|e| AppError::InferenceError(format!("Failed to create input array: {}", e)))?;
+        
+        let input_tensor = Value::from_array(self.session.allocator(), &input_array)
             .map_err(|e| AppError::InferenceError(e.to_string()))?;
         
-        // Run inference
-        let outputs = self.session.run(vec![input_tensor])
+        // Run inference with named input
+        let outputs = self.session.run(ort::inputs!["audio" => input_tensor])
             .map_err(|e| AppError::InferenceError(e.to_string()))?;
         
-        // Extract output (speaker probabilities)
-        let output = outputs[0]
+        // Extract speaker probabilities (shape: [batch_size, num_speakers])
+        let output = outputs["speaker_probabilities"]
             .extract_tensor::<f32>()
             .map_err(|e| AppError::InferenceError(e.to_string()))?;
         
@@ -71,7 +90,8 @@ impl ModelRunner {
         let duration = start.elapsed();
         INFERENCE_LATENCY.observe(duration.as_secs_f64());
         
-        info!("Inference completed in {:?}", duration);
+        info!("Inference completed in {:?} - Speaker 1: {:.2}%, Speaker 2: {:.2}%",
+              duration, result.get(0).unwrap_or(&0.0) * 100.0, result.get(1).unwrap_or(&0.0) * 100.0);
         
         Ok(result)
     }
@@ -94,26 +114,32 @@ impl ModelManager {
     pub async fn new(models_dir: &str) -> AppResult<Self> {
         let manager = Self {
             models: Arc::new(RwLock::new(std::collections::HashMap::new())),
-            production_version: Arc::new(RwLock::new("1.0.0".to_string())),
+            production_version: Arc::new(RwLock::new("transformer".to_string())),
             models_dir: models_dir.to_string(),
         };
         
-        // Load default model (stub for now)
-        // manager.load_model("1.0.0").await?;
+        // Load transformer model
+        info!("Loading default transformer model from {}", models_dir);
+        manager.load_model("transformer").await?;
         
         Ok(manager)
     }
 
     /// Load a specific model version
     pub async fn load_model(&self, version: &str) -> AppResult<()> {
-        let model_path = format!("{}/diarization_model_v{}.onnx", self.models_dir, version);
+        // Support both versioned and default model names
+        let model_path = if version == "transformer" || version == "1.0.0" {
+            format!("{}/diarization_transformer_optimized.onnx", self.models_dir)
+        } else {
+            format!("{}/diarization_model_v{}.onnx", self.models_dir, version)
+        };
         
         let runner = ModelRunner::load(&model_path, version)?;
         
         let mut models = self.models.write().await;
         models.insert(version.to_string(), Arc::new(runner));
         
-        info!("Model {} loaded and cached", version);
+        info!("Model {} loaded and cached from {}", version, model_path);
         
         Ok(())
     }
@@ -147,5 +173,53 @@ impl ModelManager {
     /// Check if models are ready
     pub async fn is_ready(&self) -> bool {
         !self.models.read().await.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[tokio::test]
+    async fn test_transformer_inference() {
+        // Load test audio
+        let audio_bytes = fs::read("../voiceflow-ml/test_audio_f32.bin")
+            .expect("Test audio file not found - run generate_test_audio.py first");
+        
+        // Convert bytes to f32
+        let audio: Vec<f32> = audio_bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .collect();
+        
+        println!("Loaded {} audio samples ({:.2}s @ 16kHz)", 
+                 audio.len(), audio.len() as f32 / 16000.0);
+        
+        // Load model
+        let runner = ModelRunner::load(
+            "models/diarization_transformer_optimized.onnx",
+            "transformer"
+        ).expect("Failed to load model");
+        
+        // Run inference
+        let result = runner.run_inference(&audio)
+            .expect("Inference failed");
+        
+        println!("Inference results:");
+        println!("  Speaker 1: {:.2}%", result[0] * 100.0);
+        println!("  Speaker 2: {:.2}%", result[1] * 100.0);
+        
+        // Validate output
+        assert_eq!(result.len(), 2, "Should return 2 speaker probabilities");
+        assert!(result[0] >= 0.0 && result[0] <= 1.0, "Speaker 1 probability should be in [0, 1]");
+        assert!(result[1] >= 0.0 && result[1] <= 1.0, "Speaker 2 probability should be in [0, 1]");
+        
+        // Probabilities should roughly sum to 1 (with softmax)
+        let sum = result[0] + result[1];
+        assert!((sum - 1.0).abs() < 0.1, 
+                "Probabilities should sum to ~1.0, got {:.4}", sum);
+        
+        println!("✅ All assertions passed!");
     }
 }

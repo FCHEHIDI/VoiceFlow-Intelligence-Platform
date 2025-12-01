@@ -12,8 +12,11 @@ tokio = { version = "1.35", features = ["full"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
 
-# ONNX Runtime
-ort = "1.16"
+# ONNX Runtime with GPU support
+ort = { version = "2.0.0-rc.10", features = ["cuda", "download-binaries"] }
+
+# Array processing
+ndarray = "0.15"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

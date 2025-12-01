@@ -1,0 +1,14 @@
+# Dockerfile for ONNX export (no path length limits in Linux)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install minimal dependencies
+RUN pip install --no-cache-dir torch==2.1.0 transformers==4.35.2 onnx==1.15.0 onnxruntime==1.16.3
+
+# Copy model code
+COPY models/ /app/models/
+COPY export_wsl.py /app/
+
+# Set entry point
+CMD ["python", "export_wsl.py"]

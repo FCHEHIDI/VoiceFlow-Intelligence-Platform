@@ -1,0 +1,112 @@
+"""
+Export trained Transformer model to ONNX using TorchScript tracing.
+
+This approach uses torch.jit.trace + ONNX export to avoid the new
+onnxscript-based exporter that has constant folding issues.
+"""
+
+import torch
+import torch.onnx
+from pathlib import Path
+import sys
+
+from models.diarization.model import SophisticatedProductionGradeDiarizationModel
+
+def export_via_torchscript(
+    checkpoint_path: str,
+    output_path: str,
+    num_speakers: int = 2,
+    hidden_size: int = 256,
+):
+    """Export model via TorchScript tracing to avoid new exporter issues."""
+    
+    print("=" * 60)
+    print("🔄 Exporting via TorchScript (Legacy Path)")
+    print("=" * 60)
+    
+    # 1. Load model
+    print(f"\n1️⃣ Loading model from: {checkpoint_path}")
+    model = SophisticatedProductionGradeDiarizationModel(
+        num_speakers=num_speakers,
+        hidden_size=hidden_size
+    )
+    
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    
+    print(f"   ✓ Model loaded successfully!")
+    print(f"   ├─ Epoch: {checkpoint['epoch']}")
+    print(f"   ├─ Val Loss: {checkpoint['val_loss']:.4f}")
+    print(f"   └─ Val Accuracy: {checkpoint['val_accuracy']:.2f}%")
+    
+    # 2. Create dummy input
+    print(f"\n2️⃣ Creating dummy input...")
+    dummy_input = torch.randn(1, 48000)  # 3 seconds at 16kHz
+    print(f"   └─ Shape: {dummy_input.shape}")
+    
+    # 3. Trace with TorchScript
+    print(f"\n3️⃣ Tracing with TorchScript...")
+    with torch.no_grad():
+        traced_model = torch.jit.trace(model, dummy_input)
+    print(f"   ✓ Tracing successful!")
+    
+    # 4. Test traced model
+    print(f"\n4️⃣ Testing traced model...")
+    with torch.no_grad():
+        output = traced_model(dummy_input)
+    print(f"   ✓ Traced model works!")
+    print(f"   └─ Output shape: {output.shape}")
+    
+    # 5. Export traced model to ONNX
+    print(f"\n5️⃣ Exporting traced model to ONNX (fixed shapes)...")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Export with fixed shapes to avoid new exporter
+    torch.onnx.export(
+        traced_model,
+        dummy_input,
+        str(output_path),
+        export_params=True,
+        opset_version=14,
+        do_constant_folding=False,
+        input_names=['audio'],
+        output_names=['speaker_probabilities']
+    )
+    
+    print(f"   ✓ ONNX export successful!")
+    print(f"   └─ Saved to: {output_path}")
+    
+    # 6. Verify file exists
+    if output_path.exists():
+        size_mb = output_path.stat().st_size / (1024 * 1024)
+        print(f"\n✅ Export complete!")
+        print(f"   ├─ File: {output_path.name}")
+        print(f"   ├─ Size: {size_mb:.1f} MB")
+        print(f"   └─ Ready for Rust deployment!")
+    else:
+        print(f"\n❌ Export failed - file not created")
+        sys.exit(1)
+
+
+def main():
+    checkpoint_path = "../models/checkpoints/transformer_diarization_best.pth"
+    output_path = "../models/diarization_transformer.onnx"
+    
+    try:
+        export_via_torchscript(
+            checkpoint_path=checkpoint_path,
+            output_path=output_path,
+            num_speakers=2,
+            hidden_size=256
+        )
+    except Exception as e:
+        print(f"\n❌ Export failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
