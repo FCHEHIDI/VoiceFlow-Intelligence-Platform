@@ -50,7 +50,7 @@ gsutil cp models/diarization_transformer_optimized.onnx gs://your-bucket/
 gsutil cp gs://your-bucket/diarization_transformer_optimized.onnx ~/model.onnx
 ```
 
-### Step 4: Test Inference Speed
+### Step 4: Test Model Inference Speed
 
 Create `test_gpu.py` on instance:
 
@@ -86,11 +86,14 @@ p50 = latencies[len(latencies) // 2]
 p95 = latencies[int(len(latencies) * 0.95)]
 p99 = latencies[int(len(latencies) * 0.99)]
 
-print(f"\n🎯 Results:")
+print(f"\n🎯 Model Inference Results:")
 print(f"P50: {p50:.2f} ms")
 print(f"P95: {p95:.2f} ms")
 print(f"P99: {p99:.2f} ms")
-print(f"\n{'✅ PASS' if p99 < 100 else '❌ FAIL'}: P99 < 100ms")
+print(f"\n{'✅ PASS' if p99 < 10 else '❌ FAIL'}: Model P99 < 10ms (SLA target)")
+print(f"\nNote: This is MODEL INFERENCE ONLY.")
+print(f"End-to-end latency includes network (~10-40ms) + Rust overhead (~5-8ms)")
+print(f"Expected end-to-end P99: {p99 + 20:.1f}-{p99 + 48:.1f}ms")
 ```
 
 Run:

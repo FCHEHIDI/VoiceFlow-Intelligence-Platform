@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # GPU-enabled model inference service (GCP T4, A100, local RTX)
+  voiceflow-ml-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    container_name: voiceflow-ml-gpu
+    runtime: nvidia  # Requires nvidia-docker2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - ORT_TENSORRT_FP16_ENABLE=1  # Enable TensorRT FP16 optimization
+      - MODEL_PATH=/models/diarization_fast_cnn_optimized.onnx
+      - ONNX_PROVIDERS=CUDAExecutionProvider,TensorrtExecutionProvider
+      - LOG_LEVEL=info
+    volumes:
+      - ./models:/models:ro  # Read-only model access
+      - ./logs:/logs         # Write logs
+    ports:
+      - "8080:8080"  # HTTP API
+      - "9090:9090"  # Metrics/health
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Monitoring (Prometheus + Grafana)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: voiceflow-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9091:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: voiceflow-grafana
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin  # Change in production!
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: voiceflow-gpu-network

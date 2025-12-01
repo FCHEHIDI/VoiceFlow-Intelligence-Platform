@@ -65,3 +65,17 @@ logs/
 *.tmp
 tmp/
 temp/
+# Test artifacts
+test_audio.wav
+test_audio_f32.bin
+*.bin
+*.wav
+
+# Model checkpoints
+models/checkpoints/*.pth
+*.onnx.data
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
