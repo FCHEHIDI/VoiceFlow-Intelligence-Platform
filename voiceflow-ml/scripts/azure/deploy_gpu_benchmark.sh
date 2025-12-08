@@ -7,7 +7,7 @@ set -euo pipefail
 # Configuration
 MODEL_PATH="${1:-models/diarization_transformer_optimized.onnx}"
 RESOURCE_GROUP="voiceflow-gpu-test"
-LOCATION="francecentral"
+LOCATION="eastus"
 VM_NAME="voiceflow-gpu-vm"
 VM_SIZE="Standard_NC4as_T4_v3"  # T4 GPU, 4 vCPUs, 28GB RAM
 IMAGE="Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest"
