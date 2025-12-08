@@ -42,8 +42,12 @@ async fn main() -> anyhow::Result<()> {
     // Setup metrics
     setup_metrics();
 
+    // Get models directory from environment or use default
+    let models_dir = std::env::var("MODELS_DIR").unwrap_or_else(|_| "../voiceflow-ml/models".to_string());
+    info!("Using models directory: {}", models_dir);
+
     // Initialize model manager
-    let model_manager = Arc::new(ModelManager::new("../models").await?);
+    let model_manager = Arc::new(ModelManager::new(&models_dir).await?);
     
     // Create application state
     let app_state = AppState { model_manager };
@@ -64,8 +68,8 @@ async fn main() -> anyhow::Result<()> {
     info!("Listening on {}", addr);
 
     // Start server with graceful shutdown
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 

@@ -1,6 +1,4 @@
-"""
-WebSocket streaming handler for real-time audio processing.
-"""
+//! WebSocket streaming handler for real-time audio processing.
 
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
@@ -64,7 +62,7 @@ pub async fn handle_websocket(mut socket: WebSocket, state: AppState) -> AppResu
                             let model = state.model_manager.get_production_model().await?;
                             
                             // Run inference
-                            match model.run_inference(&audio_buffer[..16000]) {
+                            match model.run_inference(&audio_buffer[..16000]).await {
                                 Ok(speaker_probs) => {
                                     // Post-process
                                     let speaker_id = if speaker_probs.len() >= 2 {

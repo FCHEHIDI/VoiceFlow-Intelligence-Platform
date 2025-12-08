@@ -1,6 +1,4 @@
-"""
-Prometheus metrics setup and registry.
-"""
+//! Prometheus metrics setup and registry.
 
 use lazy_static::lazy_static;
 use prometheus::{register_histogram, register_counter, register_gauge, Histogram, Counter, Gauge, TextEncoder, Encoder};

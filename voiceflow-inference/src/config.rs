@@ -1,6 +1,4 @@
-"""
-Configuration management for the inference service.
-"""
+//! Configuration management for the inference service.
 
 use serde::{Deserialize, Serialize};
 use std::env;

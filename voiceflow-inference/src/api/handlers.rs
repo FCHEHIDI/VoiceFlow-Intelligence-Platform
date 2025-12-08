@@ -1,6 +1,4 @@
-"""
-HTTP API handlers for Axum.
-"""
+//! HTTP API handlers for Axum.
 
 use axum::{
     extract::{State, ws::{WebSocket, WebSocketUpgrade}},
@@ -83,7 +81,7 @@ pub async fn inference_handler(
     let model = state.model_manager.get_production_model().await?;
     
     // Run inference
-    let speaker_probs = model.run_inference(&request.audio)
+    let speaker_probs = model.run_inference(&request.audio).await
         .map_err(|e| {
             INFERENCE_ERRORS_TOTAL.inc();
             e

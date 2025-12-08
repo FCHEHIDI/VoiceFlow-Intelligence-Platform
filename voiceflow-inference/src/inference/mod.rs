@@ -1,19 +1,17 @@
-"""
-ONNX Runtime integration for model inference.
-"""
+//! ONNX Runtime integration for model inference.
 
-use ort::{GraphOptimizationLevel, Session, Value};
+use ort::{session::{Session, builder::GraphOptimizationLevel}, value::Value, execution_providers::CPUExecutionProvider};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::time::Instant;
-use tracing::{info, error};
+use tracing::info;
 
 use crate::error::{AppError, AppResult};
 use crate::metrics::{INFERENCE_LATENCY, MODEL_LOAD_TIME};
 
 /// Model runner with ONNX Runtime
 pub struct ModelRunner {
-    session: Arc<Session>,
+    session: Arc<RwLock<Session>>,
     version: String,
 }
 
@@ -30,11 +28,8 @@ impl ModelRunner {
             .map_err(|e| AppError::ModelLoadError(e.to_string()))?
             .with_intra_threads(4)
             .map_err(|e| AppError::ModelLoadError(e.to_string()))?
-            // Enable GPU if available (CUDA/DirectML), fallback to CPU
-            .with_execution_providers([
-                ort::CUDAExecutionProvider::default().build(),
-                ort::CPUExecutionProvider::default().build(),
-            ])
+            // Enable CPU execution (GPU can be added later)
+            .with_execution_providers([CPUExecutionProvider::default().build()])
             .map_err(|e| AppError::ModelLoadError(e.to_string()))?
             .commit_from_file(path)
             .map_err(|e| AppError::ModelLoadError(e.to_string()))?;
@@ -45,7 +40,7 @@ impl ModelRunner {
         info!("Model loaded in {:?}", duration);
         
         Ok(Self {
-            session: Arc::new(session),
+            session: Arc::new(RwLock::new(session)),
             version: version.to_string(),
         })
     }
@@ -54,7 +49,7 @@ impl ModelRunner {
     /// 
     /// Input: audio samples (16kHz mono, f32)
     /// Output: speaker probabilities [speaker_1, speaker_2]
-    pub fn run_inference(&self, audio: &[f32]) -> AppResult<Vec<f32>> {
+    pub async fn run_inference(&self, audio: &[f32]) -> AppResult<Vec<f32>> {
         let start = Instant::now();
         
         // Transformer model expects: [batch_size, audio_length]
@@ -66,25 +61,24 @@ impl ModelRunner {
               audio_length, audio_length as f32 / 16000.0);
         
         // Create input tensor
-        use ndarray::Array2;
-        let input_array = Array2::from_shape_vec(
-            (batch_size, audio_length),
-            audio.to_vec()
-        ).map_err(|e| AppError::InferenceError(format!("Failed to create input array: {}", e)))?;
+        use ndarray::Array;
+        let input_shape = vec![batch_size, audio_length];
+        let input_data = audio.to_vec();
         
-        let input_tensor = Value::from_array(self.session.allocator(), &input_array)
+        let input_tensor = Value::from_array((input_shape.as_slice(), input_data))
             .map_err(|e| AppError::InferenceError(e.to_string()))?;
         
         // Run inference with named input
-        let outputs = self.session.run(ort::inputs!["audio" => input_tensor])
+        let mut session = self.session.write().await;
+        let outputs = session.run(ort::inputs!["audio" => input_tensor])
             .map_err(|e| AppError::InferenceError(e.to_string()))?;
         
         // Extract speaker probabilities (shape: [batch_size, num_speakers])
         let output = outputs["speaker_probabilities"]
-            .extract_tensor::<f32>()
+            .try_extract_tensor::<f32>()
             .map_err(|e| AppError::InferenceError(e.to_string()))?;
         
-        let result: Vec<f32> = output.view().iter().copied().collect();
+        let result: Vec<f32> = output.1.to_vec();
         
         // Record latency
         let duration = start.elapsed();

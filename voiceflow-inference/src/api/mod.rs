@@ -1,4 +1,4 @@
-"""API handlers module."""
+//! API handlers module.
 
 pub mod handlers;
 

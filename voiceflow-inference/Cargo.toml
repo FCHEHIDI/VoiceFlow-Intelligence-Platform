@@ -7,13 +7,13 @@ description = "High-performance real-time speaker diarization inference engine"
 
 [dependencies]
 # Web framework
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1.35", features = ["full"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
 
-# ONNX Runtime with GPU support
-ort = { version = "2.0.0-rc.10", features = ["cuda", "download-binaries"] }
+# ONNX Runtime - CPU only for local testing (GPU for production)
+ort = { version = "2.0.0-rc.10", features = ["download-binaries"] }
 
 # Array processing
 ndarray = "0.15"

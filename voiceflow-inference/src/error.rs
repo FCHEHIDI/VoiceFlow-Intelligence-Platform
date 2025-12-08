@@ -1,6 +1,4 @@
-"""
-Custom error types for the application.
-"""
+//! Custom error types for the application.
 
 use axum::{
     http::StatusCode,
