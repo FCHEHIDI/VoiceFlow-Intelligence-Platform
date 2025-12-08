@@ -1,0 +1,30 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+experiment_name: voiceflow_gpu_benchmark
+display_name: T4_GPU_Inference_Test
+description: Benchmark ONNX model on T4 GPU
+
+code: ./scripts/azure
+command: >-
+  python benchmark_gpu.py
+  --model ${{inputs.model_path}}
+  --iterations 200
+  --output benchmark_results.json
+
+inputs:
+  model_path:
+    type: uri_file
+
+environment:
+  image: mcr.microsoft.com/azureml/curated/acpt-pytorch-2.0-cuda11.7:latest
+  conda_file: environment.yml
+
+compute: azureml:gpu-cluster
+
+resources:
+  instance_count: 1
+
+outputs:
+  results:
+    type: uri_folder
+    mode: rw_mount
