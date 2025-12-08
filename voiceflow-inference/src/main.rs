@@ -1,6 +1,4 @@
-"""
-Main entry point for Rust inference engine.
-"""
+// Main entry point for Rust inference engine.
 
 use axum::{
     Router,
