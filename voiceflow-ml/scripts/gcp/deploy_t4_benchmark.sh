@@ -8,7 +8,7 @@ set -euo pipefail
 MODEL_PATH="${1:-models/diarization_fast_cnn_optimized.onnx}"
 PROJECT_ID="${2:-}"
 INSTANCE_NAME="voiceflow-t4-benchmark"
-ZONE="us-central1-a"
+ZONE="europe-west4-a"
 MACHINE_TYPE="n1-standard-4"
 GPU_TYPE="nvidia-tesla-t4"
 
@@ -47,10 +47,11 @@ gcloud compute instances create "$INSTANCE_NAME" \
     --zone="$ZONE" \
     --machine-type="$MACHINE_TYPE" \
     --accelerator=type="$GPU_TYPE",count=1 \
-    --image-family=pytorch-latest-gpu \
-    --image-project=deeplearning-platform-release \
+    --image-family=ubuntu-2204-lts \
+    --image-project=ubuntu-os-cloud \
     --maintenance-policy=TERMINATE \
     --boot-disk-size=50GB \
+    --scopes=cloud-platform \
     --metadata="install-nvidia-driver=True" \
     || echo -e "${YELLOW}⚠️  Instance may already exist${NC}"
 
@@ -62,11 +63,15 @@ sleep 30
 echo -e "${YELLOW}📦 Installing dependencies...${NC}"
 gcloud compute ssh "$INSTANCE_NAME" --zone="$ZONE" --command="
     set -e
+    echo '🔧 Installing system packages...'
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq python3-pip nvidia-driver-535 nvidia-cuda-toolkit
+    
     echo '🔧 Installing Python packages...'
-    pip install -q onnxruntime-gpu numpy
+    pip3 install -q onnxruntime-gpu numpy
     
     echo '✅ Verifying GPU...'
-    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv || echo 'GPU check will work after reboot'
 "
 
 # Upload model
