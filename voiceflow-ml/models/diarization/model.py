@@ -99,15 +99,23 @@ class LightweightCNNEncoder(nn.Module):
     - Total reduction: 32x (vs 4096x before)
     """
     
-    def __init__(self, out_features: int = 256, num_layers: int = 5):
+    def __init__(self, out_features: int = 256, num_layers: int = 5, in_channels: int = 1):
+        """
+        Args:
+            out_features: Output embedding dimension
+            num_layers: Number of residual blocks (default 5)
+            in_channels: Input channels (1 for raw waveform, 80 for MFCCs)
+        """
         super().__init__()
         
-        # Channel progression: 1 -> 64 -> 128 -> 256 -> 256 -> 512
-        channels = [1, 64, 128, 256, 256, 512]
+        self.in_channels = in_channels
+        
+        # Channel progression: in_channels -> 64 -> 128 -> 256 -> 256 -> 512
+        channels = [in_channels, 64, 128, 256, 256, 512]
         
         # Initial conv to expand channels
         self.conv1 = nn.Sequential(
-            nn.Conv1d(1, 64, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.Conv1d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False),
             nn.BatchNorm1d(64),
             nn.ReLU(inplace=True)
         )
@@ -134,13 +142,19 @@ class LightweightCNNEncoder(nn.Module):
     def forward(self, audio: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            audio: Raw audio waveform [batch, audio_length]
+            audio: Raw audio waveform [batch, audio_length] OR
+                   MFCC features [batch, channels, n_frames]
         
         Returns:
             embeddings: Fixed-size audio embeddings [batch, out_features]
         """
-        # Add channel dimension: [batch, 1, audio_length]
-        x = audio.unsqueeze(1)
+        # Handle different input shapes
+        if audio.dim() == 2:
+            # Raw waveform: [batch, audio_length] -> [batch, 1, audio_length]
+            x = audio.unsqueeze(1)
+        else:
+            # MFCC features: [batch, channels, n_frames] (already has channel dim)
+            x = audio
         
         # Initial conv
         x = self.conv1(x)  # [batch, 64, audio_length/2]
@@ -306,17 +320,19 @@ class FastDiarizationModel(nn.Module):
         encoder_type: Literal["lightweight-cnn", "distilhubert"] = "lightweight-cnn",
         freeze_encoder: bool = False,  # CNNs are fast to train
         dropout: float = 0.1,
+        in_channels: int = 1,  # 🔑 NEW: Support MFCC input (80 channels)
     ):
         super().__init__()
         
         self.num_speakers = num_speakers
         self.hidden_size = hidden_size
         self.encoder_type = encoder_type
+        self.in_channels = in_channels
         
         # Select encoder
         if encoder_type == "lightweight-cnn":
-            print("Using Lightweight CNN encoder (2-3M params)")
-            self.encoder = LightweightCNNEncoder(out_features=hidden_size)
+            print(f"Using Lightweight CNN encoder (2-3M params, {in_channels} input channels)")
+            self.encoder = LightweightCNNEncoder(out_features=hidden_size, in_channels=in_channels)
             encoder_dim = hidden_size
         elif encoder_type == "distilhubert":
             print("Loading DistilHuBERT encoder (33M params)")
