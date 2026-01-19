@@ -7,6 +7,8 @@
 
 Production-ready real-time speaker diarization system with hybrid Python/Rust architecture, optimized for <100ms end-to-end latency streaming.
 
+![VoiceFlow Diarization](assets/diarizerVoices.png)
+
 ## 🎯 Overview
 
 VoiceFlow Intelligence Platform is a sophisticated audio processing system that identifies "who speaks when" in audio streams. It combines:
