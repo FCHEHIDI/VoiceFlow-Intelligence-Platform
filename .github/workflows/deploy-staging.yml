@@ -1,0 +1,105 @@
+name: Deploy Staging
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  IMAGE_TAG: sha-${{ github.sha }}
+
+jobs:
+  build-push:
+    name: Build & push images to ECR
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push ml-service image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./voiceflow-ml
+          file: ./voiceflow-ml/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.ECR_ML_URL }}:${{ env.IMAGE_TAG }}
+            ${{ secrets.ECR_ML_URL }}:staging-latest
+          cache-from: type=gha,scope=ml-service
+          cache-to: type=gha,mode=max,scope=ml-service
+
+      - name: Build & push inference-engine image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./voiceflow-inference
+          file: ./voiceflow-inference/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.ECR_INFERENCE_URL }}:${{ env.IMAGE_TAG }}
+            ${{ secrets.ECR_INFERENCE_URL }}:staging-latest
+          cache-from: type=gha,scope=inference-engine
+          cache-to: type=gha,mode=max,scope=inference-engine
+
+  deploy-ecs:
+    name: Deploy to ECS staging
+    needs: build-push
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force new ECS deployment for each service
+        run: |
+          for service in ml-service inference-engine; do
+            echo "Updating $service in cluster voiceflow-staging"
+            aws ecs update-service \
+              --cluster voiceflow-staging \
+              --service "$service" \
+              --force-new-deployment
+          done
+
+      - name: Wait for services to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster voiceflow-staging \
+            --services ml-service inference-engine
+
+  smoke-tests:
+    name: Smoke tests on staging
+    needs: deploy-ecs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl /health on ml-service
+        run: curl -fsS --retry 5 --retry-delay 5 "${{ secrets.STAGING_ALB_URL }}/health"
+
+      - name: Curl /health on inference-engine
+        run: curl -fsS --retry 5 --retry-delay 5 "${{ secrets.STAGING_ALB_URL }}:3000/health"

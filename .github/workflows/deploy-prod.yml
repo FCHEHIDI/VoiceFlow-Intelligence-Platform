@@ -1,0 +1,61 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (default: staging-latest)'
+        required: false
+        default: 'staging-latest'
+      confirm:
+        description: 'Type DEPLOY (uppercase) to confirm production deployment'
+        required: true
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+
+jobs:
+  gate:
+    name: Validate confirmation token
+    if: ${{ github.event.inputs.confirm == 'DEPLOY' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm deployment intent
+        run: |
+          echo "Confirmation accepted."
+          echo "Deploying image_tag='${{ github.event.inputs.image_tag }}' to production cluster voiceflow-prod"
+
+  deploy:
+    name: Deploy to ECS production
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials via OIDC (prod role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force new ECS deployment in voiceflow-prod
+        run: |
+          for service in ml-service inference-engine; do
+            echo "Updating $service in cluster voiceflow-prod"
+            aws ecs update-service \
+              --cluster voiceflow-prod \
+              --service "$service" \
+              --force-new-deployment
+          done
+
+      - name: Wait for services to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster voiceflow-prod \
+            --services ml-service inference-engine

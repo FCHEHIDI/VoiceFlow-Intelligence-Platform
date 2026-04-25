@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-python:
+    name: Test Python (voiceflow-ml)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: voiceflow-ml
+    env:
+      JWT_SECRET_KEY: ci-test-jwt-secret-key-must-be-at-least-32-chars-long-xxx
+      POSTGRES_PASSWORD: ci-test-postgres-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: voiceflow-ml/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov mypy flake8 bandit
+
+      - name: Run pytest with coverage
+        run: pytest tests/ --cov=. --cov-fail-under=70 -m "not hardware and not slow" -q
+
+      - name: Run mypy (type checker)
+        run: mypy . --ignore-missing-imports
+
+      - name: Run flake8 (linter)
+        run: flake8 . --max-line-length=100 --exclude=.venv,migrations
+
+      - name: Run bandit (security linter)
+        run: bandit -r . -ll -x tests/
+
+  test-rust:
+    name: Test Rust (voiceflow-inference)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: voiceflow-inference
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: voiceflow-inference
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy (lints)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run cargo test
+        run: cargo test --verbose
+
+      - name: Security audit (cargo-audit)
+        continue-on-error: true
+        run: |
+          cargo install cargo-audit --locked || cargo install cargo-audit
+          cargo audit
+
+  security-scan:
+    name: Security Scan (gitleaks + semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: SAST scan (semgrep)
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: p/owasp-top-ten
