@@ -1,36 +1,23 @@
-// Main entry point for Rust inference engine.
+//! Binary entry point — wires the library crate into an Axum service.
 
-use axum::{
-    Router,
-    routing::{get, post},
-};
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+use axum::{routing::{get, post}, Router};
 use tokio::signal;
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, Level};
-use tracing_subscriber;
 
-mod api;
-mod inference;
-mod streaming;
-mod metrics;
-mod config;
-mod error;
-
-use crate::api::handlers;
-use crate::inference::ModelManager;
-use crate::metrics::setup_metrics;
-
-/// Application state shared across handlers
-#[derive(Clone)]
-pub struct AppState {
-    pub model_manager: Arc<ModelManager>,
-}
+use voiceflow_inference::api::handlers;
+use voiceflow_inference::config::validate_required_secrets;
+use voiceflow_inference::inference::ModelManager;
+use voiceflow_inference::metrics::setup_metrics;
+use voiceflow_inference::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
+    validate_required_secrets();
+
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
         .with_target(false)
@@ -39,20 +26,15 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting VoiceFlow Inference Engine v1.0.0");
 
-    // Setup metrics
     setup_metrics();
 
-    // Get models directory from environment or use default
-    let models_dir = std::env::var("MODELS_DIR").unwrap_or_else(|_| "../voiceflow-ml/models".to_string());
+    let models_dir = std::env::var("MODELS_DIR")
+        .unwrap_or_else(|_| "../voiceflow-ml/models".to_string());
     info!("Using models directory: {}", models_dir);
 
-    // Initialize model manager
     let model_manager = Arc::new(ModelManager::new(&models_dir).await?);
-    
-    // Create application state
     let app_state = AppState { model_manager };
 
-    // Build router
     let app = Router::new()
         .route("/", get(root))
         .route("/health", get(handlers::health_check))
@@ -63,11 +45,9 @@ async fn main() -> anyhow::Result<()> {
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any))
         .with_state(app_state);
 
-    // Bind server
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     info!("Listening on {}", addr);
 
-    // Start server with graceful shutdown
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
@@ -77,17 +57,13 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Root endpoint
 async fn root() -> &'static str {
     "VoiceFlow Inference Engine v1.0.0"
 }
 
-/// Graceful shutdown handler
 async fn shutdown_signal() {
     let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]
@@ -102,12 +78,8 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {
-            info!("Received Ctrl+C signal");
-        },
-        _ = terminate => {
-            info!("Received terminate signal");
-        },
+        _ = ctrl_c => info!("Received Ctrl+C signal"),
+        _ = terminate => info!("Received terminate signal"),
     }
 
     info!("Starting graceful shutdown...");

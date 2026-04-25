@@ -51,6 +51,8 @@ tokio-tungstenite = "0.21"
 # Testing
 tokio-test = "0.4"
 httpmock = "0.7"
+# Tests construct Array1<f32> embeddings directly (matches the public API).
+ndarray = "0.15"
 
 [profile.release]
 opt-level = 3

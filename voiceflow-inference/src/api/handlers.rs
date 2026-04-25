@@ -1,17 +1,20 @@
 //! HTTP API handlers for Axum.
 
 use axum::{
-    extract::{State, ws::{WebSocket, WebSocketUpgrade}},
+    extract::{ws::{WebSocket, WebSocketUpgrade}, State},
     response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
-use tracing::{info, error};
+use tracing::{error, info};
 
-use crate::{AppState, error::{AppError, AppResult}};
-use crate::metrics::{gather_metrics, INFERENCE_REQUESTS_TOTAL, INFERENCE_ERRORS_TOTAL, WEBSOCKET_CONNECTIONS_ACTIVE};
-use crate::streaming::handle_websocket;
+use crate::error::{AppError, AppResult};
+use crate::metrics::{
+    gather_metrics, INFERENCE_ERRORS_TOTAL, INFERENCE_REQUESTS_TOTAL, WEBSOCKET_CONNECTIONS_ACTIVE,
+};
+use crate::streaming::{clustering::OnlineClusterer, handle_websocket, sliding_window::sliding_window};
+use crate::AppState;
 
 /// Health check endpoint
 pub async fn health_check() -> &'static str {
@@ -21,23 +24,18 @@ pub async fn health_check() -> &'static str {
 /// Readiness check endpoint
 pub async fn readiness_check(State(state): State<AppState>) -> Response {
     let is_ready = state.model_manager.is_ready().await;
-    
     if is_ready {
         (
             axum::http::StatusCode::OK,
-            Json(serde_json::json!({
-                "ready": true,
-                "models": "loaded"
-            }))
-        ).into_response()
+            Json(serde_json::json!({"ready": true, "models": "loaded"})),
+        )
+            .into_response()
     } else {
         (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({
-                "ready": false,
-                "models": "not loaded"
-            }))
-        ).into_response()
+            Json(serde_json::json!({"ready": false, "models": "not loaded"})),
+        )
+            .into_response()
     }
 }
 
@@ -47,6 +45,17 @@ pub struct InferenceRequest {
     pub audio: Vec<f32>,
     pub sample_rate: u32,
     pub model_version: Option<String>,
+    #[serde(default = "default_window_secs")]
+    pub window_secs: f64,
+    #[serde(default = "default_hop_secs")]
+    pub hop_secs: f64,
+}
+
+fn default_window_secs() -> f64 {
+    3.0
+}
+fn default_hop_secs() -> f64 {
+    1.0
 }
 
 /// Segment model
@@ -64,58 +73,69 @@ pub struct InferenceResponse {
     pub segments: Vec<Segment>,
     pub latency_ms: u64,
     pub model_version: String,
+    pub total_speakers: usize,
 }
 
-/// Inference handler
+/// POST /infer — runs the full diarization pipeline (sliding window + embedding + clustering).
 pub async fn inference_handler(
     State(state): State<AppState>,
     Json(request): Json<InferenceRequest>,
 ) -> AppResult<Json<InferenceResponse>> {
     let start = Instant::now();
-    
-    info!("Inference request received, audio length: {}", request.audio.len());
-    
     INFERENCE_REQUESTS_TOTAL.inc();
-    
-    // Get production model
+
+    if request.audio.is_empty() {
+        INFERENCE_ERRORS_TOTAL.inc();
+        return Err(AppError::InvalidInput("audio must be non-empty".to_string()));
+    }
+    if request.sample_rate == 0 {
+        INFERENCE_ERRORS_TOTAL.inc();
+        return Err(AppError::InvalidInput("sample_rate must be > 0".to_string()));
+    }
+
+    info!(
+        "Inference request: {} samples ({:.2}s @ {}Hz)",
+        request.audio.len(),
+        request.audio.len() as f64 / request.sample_rate as f64,
+        request.sample_rate
+    );
+
     let model = state.model_manager.get_production_model().await?;
-    
-    // Run inference
-    let speaker_probs = model.run_inference(&request.audio).await
-        .map_err(|e| {
+    let windows = sliding_window(
+        &request.audio,
+        request.window_secs,
+        request.hop_secs,
+        request.sample_rate,
+    );
+
+    let mut clusterer = OnlineClusterer::new();
+    for (start_sec, end_sec, win) in windows {
+        let embedding = model.run_embedding(&win).await.inspect_err(|_| {
             INFERENCE_ERRORS_TOTAL.inc();
-            e
         })?;
-    
-    // Post-process: convert probabilities to segments
-    // For demo, create stub segment
-    let speaker_id = if speaker_probs.len() >= 2 {
-        if speaker_probs[0] > speaker_probs[1] {
-            "SPEAKER_00".to_string()
-        } else {
-            "SPEAKER_01".to_string()
-        }
-    } else {
-        "SPEAKER_00".to_string()
-    };
-    
-    let confidence = speaker_probs.iter().copied().fold(0.0f32, f32::max);
-    
-    let segments = vec![Segment {
-        start: 0.0,
-        end: 1.0,
-        speaker_id,
-        confidence: confidence as f64,
-    }];
-    
+        clusterer.add_embedding_at(embedding, start_sec, end_sec);
+    }
+
+    let segments: Vec<Segment> = clusterer
+        .get_segments()
+        .into_iter()
+        .map(|(s, e, sid)| Segment {
+            start: s,
+            end: e,
+            speaker_id: format!("speaker_{}", sid),
+            confidence: 1.0,
+        })
+        .collect();
+
+    let total_speakers = clusterer.num_speakers();
     let latency_ms = start.elapsed().as_millis() as u64;
-    
-    info!("Inference completed in {}ms", latency_ms);
-    
+    info!("Inference completed in {}ms ({} segments, {} speakers)", latency_ms, segments.len(), total_speakers);
+
     Ok(Json(InferenceResponse {
         segments,
         latency_ms,
         model_version: model.version().to_string(),
+        total_speakers,
     }))
 }
 
@@ -132,18 +152,12 @@ pub async fn websocket_handler(
     ws.on_upgrade(move |socket| handle_websocket_connection(socket, state))
 }
 
-/// Handle WebSocket connection
 async fn handle_websocket_connection(socket: WebSocket, state: AppState) {
     WEBSOCKET_CONNECTIONS_ACTIVE.inc();
-    
     info!("New WebSocket connection established");
-    
-    // Delegate to streaming module
     if let Err(e) = handle_websocket(socket, state).await {
         error!("WebSocket error: {}", e);
     }
-    
     WEBSOCKET_CONNECTIONS_ACTIVE.dec();
-    
     info!("WebSocket connection closed");
 }

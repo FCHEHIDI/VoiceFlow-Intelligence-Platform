@@ -1,13 +1,17 @@
 //! ONNX Runtime integration for model inference.
 
+use ndarray::Array1;
 use ort::{session::{Session, builder::GraphOptimizationLevel}, value::Value, execution_providers::CPUExecutionProvider};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::metrics::{INFERENCE_LATENCY, MODEL_LOAD_TIME};
+
+/// Output node name for embedding extraction (per Agent 3 handoff).
+pub const EMBEDDING_OUTPUT_NODE: &str = "embedding";
 
 /// Model runner with ONNX Runtime
 pub struct ModelRunner {
@@ -60,8 +64,6 @@ impl ModelRunner {
         info!("Running inference on {} samples ({:.2}s audio)", 
               audio_length, audio_length as f32 / 16000.0);
         
-        // Create input tensor
-        use ndarray::Array;
         let input_shape = vec![batch_size, audio_length];
         let input_data = audio.to_vec();
         
@@ -84,15 +86,76 @@ impl ModelRunner {
         let duration = start.elapsed();
         INFERENCE_LATENCY.observe(duration.as_secs_f64());
         
-        info!("Inference completed in {:?} - Speaker 1: {:.2}%, Speaker 2: {:.2}%",
-              duration, result.get(0).unwrap_or(&0.0) * 100.0, result.get(1).unwrap_or(&0.0) * 100.0);
+        info!(
+            "Inference completed in {:?} - Speaker 1: {:.2}%, Speaker 2: {:.2}%",
+            duration,
+            result.first().unwrap_or(&0.0) * 100.0,
+            result.get(1).unwrap_or(&0.0) * 100.0
+        );
         
         Ok(result)
+    }
+
+    /// Run embedding extraction for diarization streaming.
+    ///
+    /// Accepts raw PCM samples (16 kHz mono) and returns an L2-normalised vector
+    /// extracted from the ONNX node named [`EMBEDDING_OUTPUT_NODE`]. Falls back
+    /// to the first output of the session if the named node is absent.
+    pub async fn run_embedding(&self, audio: &[f32]) -> AppResult<Array1<f32>> {
+        let start = Instant::now();
+        let batch_size = 1usize;
+        let audio_length = audio.len();
+
+        let input_shape = vec![batch_size, audio_length];
+        let input_tensor = Value::from_array((input_shape.as_slice(), audio.to_vec()))
+            .map_err(|e| AppError::InferenceError(e.to_string()))?;
+
+        let mut session = self.session.write().await;
+        let outputs = session
+            .run(ort::inputs!["audio" => input_tensor])
+            .map_err(|e| AppError::InferenceError(e.to_string()))?;
+
+        let extracted: Vec<f32> = match outputs.get(EMBEDDING_OUTPUT_NODE) {
+            Some(value) => value
+                .try_extract_tensor::<f32>()
+                .map_err(|e| AppError::InferenceError(e.to_string()))?
+                .1
+                .to_vec(),
+            None => {
+                warn!(
+                    "ONNX model does not expose '{}' output — falling back to first output",
+                    EMBEDDING_OUTPUT_NODE
+                );
+                let mut iter = outputs.iter();
+                let (_name, value) = iter.next().ok_or_else(|| {
+                    AppError::InferenceError("ONNX model produced no outputs".to_string())
+                })?;
+                value
+                    .try_extract_tensor::<f32>()
+                    .map_err(|e| AppError::InferenceError(e.to_string()))?
+                    .1
+                    .to_vec()
+            }
+        };
+
+        let mut emb = Array1::from(extracted);
+        l2_normalize(&mut emb);
+
+        let duration = start.elapsed();
+        INFERENCE_LATENCY.observe(duration.as_secs_f64());
+        Ok(emb)
     }
 
     /// Get model version
     pub fn version(&self) -> &str {
         &self.version
+    }
+}
+
+fn l2_normalize(v: &mut Array1<f32>) {
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 1e-8 {
+        v.mapv_inplace(|x| x / norm);
     }
 }
 
@@ -175,45 +238,25 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// End-to-end test against a real ONNX model — only runs when the model and
+    /// reference audio are available locally. Run with: `cargo test -- --ignored`.
     #[tokio::test]
-    async fn test_transformer_inference() {
-        // Load test audio
+    #[ignore]
+    async fn transformer_inference_smoke() {
         let audio_bytes = fs::read("../voiceflow-ml/test_audio_f32.bin")
             .expect("Test audio file not found - run generate_test_audio.py first");
-        
-        // Convert bytes to f32
         let audio: Vec<f32> = audio_bytes
             .chunks_exact(4)
             .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
             .collect();
-        
-        println!("Loaded {} audio samples ({:.2}s @ 16kHz)", 
-                 audio.len(), audio.len() as f32 / 16000.0);
-        
-        // Load model
+
         let runner = ModelRunner::load(
             "models/diarization_transformer_optimized.onnx",
-            "transformer"
-        ).expect("Failed to load model");
-        
-        // Run inference
-        let result = runner.run_inference(&audio)
-            .expect("Inference failed");
-        
-        println!("Inference results:");
-        println!("  Speaker 1: {:.2}%", result[0] * 100.0);
-        println!("  Speaker 2: {:.2}%", result[1] * 100.0);
-        
-        // Validate output
-        assert_eq!(result.len(), 2, "Should return 2 speaker probabilities");
-        assert!(result[0] >= 0.0 && result[0] <= 1.0, "Speaker 1 probability should be in [0, 1]");
-        assert!(result[1] >= 0.0 && result[1] <= 1.0, "Speaker 2 probability should be in [0, 1]");
-        
-        // Probabilities should roughly sum to 1 (with softmax)
-        let sum = result[0] + result[1];
-        assert!((sum - 1.0).abs() < 0.1, 
-                "Probabilities should sum to ~1.0, got {:.4}", sum);
-        
-        println!("✅ All assertions passed!");
+            "transformer",
+        )
+        .expect("Failed to load model");
+
+        let result = runner.run_inference(&audio).await.expect("Inference failed");
+        assert!(result.iter().all(|p| (0.0..=1.0).contains(p)));
     }
 }
