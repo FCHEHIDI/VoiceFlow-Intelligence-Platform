@@ -1,48 +1,60 @@
-"""
-Health check endpoints.
-"""
+"""Health / readiness endpoints — drives ECS, Kubernetes and ALB probes."""
+from __future__ import annotations
 
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+import asyncio
+from typing import Any
+
 import structlog
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
-from core import get_db, check_db_connection
+from core.config import settings
+from core.database import check_db_connection
 from core.redis_client import check_redis_connection
 
 router = APIRouter()
-logger = structlog.get_logger()
+logger = structlog.get_logger(__name__)
 
 
 @router.get("/health")
-async def health_check():
-    """
-    Basic health check endpoint.
-    Returns 200 if service is running.
-    """
-    return {"status": "healthy"}
+async def health_check() -> dict[str, str]:
+    """Liveness probe — returns 200 as long as the process is alive."""
+    return {"status": "healthy", "service": "voiceflow-ml"}
+
+
+async def _ping_rust(url: str | None) -> dict[str, Any]:
+    if not url:
+        return {"status": "skipped", "reason": "rust_service_url unset"}
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
+            resp = await client.get(f"{url.rstrip('/')}/health")
+            return {"status": "ok" if resp.status_code == 200 else "down", "code": resp.status_code}
+    except Exception as exc:  # pragma: no cover - network specific
+        return {"status": "down", "error": str(exc)}
 
 
 @router.get("/ready")
-async def readiness_check():
-    """
-    Readiness probe - checks if service is ready to accept traffic.
-    Validates database and Redis connections.
-    """
-    db_healthy = check_db_connection()
-    redis_healthy = await check_redis_connection()
-    
-    is_ready = db_healthy and redis_healthy
-    
-    status = {
-        "ready": is_ready,
-        "checks": {
-            "database": "up" if db_healthy else "down",
-            "redis": "up" if redis_healthy else "down"
-        }
+async def readiness_check() -> JSONResponse:
+    """Readiness probe — verifies DB, Redis and downstream Rust service."""
+    db_ok = check_db_connection()
+    redis_ok, rust_status = await asyncio.gather(
+        check_redis_connection(),
+        _ping_rust(getattr(settings, "rust_service_url", None)),
+    )
+
+    checks = {
+        "database": {"status": "ok" if db_ok else "down"},
+        "redis": {"status": "ok" if redis_ok else "down"},
+        "rust_service": rust_status,
     }
-    
-    if not is_ready:
-        logger.warning("Service not ready", checks=status["checks"])
-        return status, 503
-    
-    return status
+    all_ok = all(c["status"] in {"ok", "skipped"} for c in checks.values())
+
+    if not all_ok:
+        logger.warning("service_not_ready", checks=checks)
+
+    return JSONResponse(
+        status_code=200 if all_ok else 503,
+        content={"status": "ready" if all_ok else "degraded", "checks": checks},
+    )

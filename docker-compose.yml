@@ -6,9 +6,9 @@ services:
     image: postgres:15-alpine
     container_name: voiceflow-postgres
     environment:
-      POSTGRES_USER: voiceflow
-      POSTGRES_PASSWORD: voiceflow_password
-      POSTGRES_DB: voiceflow
+      POSTGRES_USER: ${POSTGRES_USER:-voiceflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-voiceflow}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -47,13 +47,16 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_USER=voiceflow
-      - POSTGRES_PASSWORD=voiceflow_password
-      - POSTGRES_DB=voiceflow
+      - POSTGRES_USER=${POSTGRES_USER:-voiceflow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=${POSTGRES_DB:-voiceflow}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - RUST_SERVICE_URL=http://inference-engine:3000
       - DEBUG=false
+      - ENV=development
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:8000,http://localhost:3001}
     ports:
       - "8000:8000"
     volumes:
@@ -86,6 +89,7 @@ services:
       - MODELS_DIR=/models
       - INFERENCE_THREADS=4
       - OPTIMIZATION_LEVEL=Level3
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
     ports:
       - "3000:3000"
     volumes:
@@ -126,11 +130,14 @@ services:
     image: grafana/grafana:10.2.2
     container_name: voiceflow-grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:?GF_SECURITY_ADMIN_PASSWORD is required}
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/voiceflow-overview.json
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     ports:
       - "3001:3000"
     depends_on:

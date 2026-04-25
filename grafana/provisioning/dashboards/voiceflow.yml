@@ -1,0 +1,12 @@
+apiVersion: 1
+providers:
+  - name: voiceflow
+    orgId: 1
+    folder: VoiceFlow
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 60
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

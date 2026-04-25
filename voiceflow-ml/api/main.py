@@ -7,11 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import structlog
 
+from api.middleware.input_validation import content_length_middleware
 from core import settings, configure_logging, init_db, check_db_connection, close_redis
 from api.routes import health, models as models_routes, inference
 
-# Configure logging
-configure_logging(debug=settings.debug)
+# Configure logging — JSON in production, console renderer otherwise.
+configure_logging(env=settings.app_env, debug=settings.debug)
 logger = structlog.get_logger()
 
 
@@ -46,10 +47,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# CORS: explicit origins only; never use wildcard in production
+_cors = settings.cors_allowed_origins
+if settings.app_env == "production" and (not _cors or any(o.strip() == "*" for o in _cors)):
+    raise RuntimeError("CORS: set CORS_ORIGINS in production to explicit origins (no wildcard).")
+
+# Content-Length guard for large uploads (inference) — add before CORS (outer)
+app.add_middleware(content_length_middleware())
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=_cors,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,6 +76,19 @@ app.include_router(
     prefix=f"{settings.api_v1_prefix}/inference",
     tags=["Inference"]
 )
+
+# AWS X-Ray distributed tracing — production only.
+if settings.app_env == "production":
+    try:
+        from aws_xray_sdk.core import patch_all, xray_recorder
+        from aws_xray_sdk.ext.fastapi.middleware import XRayMiddleware
+
+        xray_recorder.configure(service="voiceflow-ml", sampling=True)
+        patch_all()
+        app.add_middleware(XRayMiddleware, recorder=xray_recorder)
+        logger.info("xray_initialised", service="voiceflow-ml")
+    except ImportError:  # pragma: no cover - optional in dev
+        logger.warning("aws_xray_sdk not installed — distributed tracing disabled")
 
 
 @app.get("/")
