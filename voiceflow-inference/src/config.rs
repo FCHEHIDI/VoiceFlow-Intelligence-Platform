@@ -2,6 +2,20 @@
 
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::process;
+
+/// Exit early if required secrets are missing.
+pub fn validate_required_secrets() {
+    for key in ["JWT_SECRET_KEY"] {
+        if std::env::var(key).is_err() {
+            eprintln!(
+                "Required secret '{}' is not set. Generate with: openssl rand -hex 32",
+                key
+            );
+            process::exit(1);
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
