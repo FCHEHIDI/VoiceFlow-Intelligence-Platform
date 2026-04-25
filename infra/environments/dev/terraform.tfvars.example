@@ -1,0 +1,39 @@
+######################################################################
+# Copy this file to terraform.tfvars (which is gitignored) and edit.
+#
+# Mandatory inputs:
+#   - alert_email
+#   - ml_image
+#   - inference_image
+#
+# Strongly recommended:
+#   - acm_certificate_arn  (otherwise the ALB serves HTTP only)
+######################################################################
+
+aws_region = "eu-west-1"
+env        = "dev"
+vpc_cidr   = "10.0.0.0/16"
+
+alert_email = "alerts@example.com"
+
+# Replace with the ECR image URIs once Agent 6's CI workflow has pushed them.
+# Until then, you can pass any pullable image (e.g. `nginx:latest`) for a
+# dry-run plan — but a real apply requires the actual VoiceFlow images.
+ml_image        = "REPLACE_WITH_ML_ECR_URI:sha-or-tag"
+inference_image = "REPLACE_WITH_INFERENCE_ECR_URI:sha-or-tag"
+
+# ACM certificate covering the public DNS name pointed at the ALB.
+# Set to null to skip TLS (dev-only, NOT recommended).
+acm_certificate_arn = null
+
+rds_min_capacity = 0.5
+rds_max_capacity = 2.0
+
+ml_desired_count        = 1
+ml_min_capacity         = 1
+ml_max_capacity         = 2
+inference_desired_count = 1
+inference_min_capacity  = 1
+inference_max_capacity  = 2
+
+log_retention_days = 30

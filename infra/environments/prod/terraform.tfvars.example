@@ -1,0 +1,33 @@
+######################################################################
+# Copy to terraform.tfvars (gitignored) and edit. PROD requires:
+#   - alert_email
+#   - ml_image (immutable tag, e.g. sha-<gitsha>)
+#   - inference_image (immutable tag)
+#   - acm_certificate_arn (mandatory; HTTPS listener requires it)
+######################################################################
+
+aws_region = "eu-west-1"
+env        = "prod"
+vpc_cidr   = "10.0.0.0/16"
+
+alert_email = "sre-oncall@example.com"
+
+ml_image        = "REPLACE_WITH_ML_ECR_URI:sha-deadbeef"
+inference_image = "REPLACE_WITH_INFERENCE_ECR_URI:sha-deadbeef"
+
+acm_certificate_arn = "arn:aws:acm:eu-west-1:000000000000:certificate/REPLACE-WITH-CERT-ID"
+
+rds_min_capacity = 1.0
+rds_max_capacity = 8.0
+
+ml_desired_count        = 2
+ml_min_capacity         = 2
+ml_max_capacity         = 10
+inference_desired_count = 2
+inference_min_capacity  = 2
+inference_max_capacity  = 10
+
+log_retention_days = 90
+
+redis_node_type          = "cache.t4g.small"
+redis_num_cache_clusters = 2
