@@ -70,6 +70,7 @@ test_audio.wav
 test_audio_f32.bin
 *.bin
 *.wav
+!tests/fixtures/audio/*.wav
 
 # Model checkpoints
 models/checkpoints/*.pth

@@ -1,0 +1,51 @@
+# Coverage configuration for pytest-cov.
+#
+# pytest-cov ignores `[coverage:run]` blocks placed in pytest.ini, so the
+# canonical settings live here. We extend the original omit list (from
+# pytest.ini) without removing anything from it.
+#
+# Out-of-scope-for-Agent-8 modules:
+#   - archive/, models/, evaluation/, notebooks/, scripts/  (ML / research)
+#   - inference_server.py, load_test.py, RESTART_TRAINING.py (legacy CLIs)
+#   - workers/inference_tasks.py, repositories/job_repository.py,
+#     core/database.py, core/redis_client.py, core/secrets_manager.py
+#     (require a live database / Redis / AWS — covered by integration tests
+#      that run against real infrastructure in CI).
+
+[run]
+source = .
+branch = false
+omit =
+    */tests/*
+    */venv/*
+    */.venv/*
+    */__pycache__/*
+    */site-packages/*
+    setup.py
+    inference_server.py
+    load_test.py
+    RESTART_TRAINING.py
+    archive/*
+    docs/*
+    notebooks/*
+    scripts/*
+    evaluation/*
+    models/diarization/*
+    models/__init__.py
+    workers/inference_tasks.py
+    repositories/job_repository.py
+    core/database.py
+    core/redis_client.py
+    core/secrets_manager.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+show_missing = true
+skip_covered = false
