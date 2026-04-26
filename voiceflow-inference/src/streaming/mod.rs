@@ -80,17 +80,16 @@ pub async fn handle_websocket(mut socket: WebSocket, state: AppState) -> AppResu
                     }
 
                     let model = state.model_manager.get_production_model().await?;
-                    let windows = sliding_window(
-                        &audio_buffer,
-                        WINDOW_SECS,
-                        HOP_SECS,
-                        SAMPLE_RATE,
-                    );
+                    let windows = sliding_window(&audio_buffer, WINDOW_SECS, HOP_SECS, SAMPLE_RATE);
 
                     for (s, e, win) in &windows {
                         match model.run_embedding(win).await {
                             Ok(emb) => {
-                                let speaker = clusterer.add_embedding_at(emb, total_seconds + *s, total_seconds + *e);
+                                let speaker = clusterer.add_embedding_at(
+                                    emb,
+                                    total_seconds + *s,
+                                    total_seconds + *e,
+                                );
                                 let response = StreamResponse::Segment {
                                     start: total_seconds + *s,
                                     end: total_seconds + *e,
@@ -140,7 +139,11 @@ pub async fn handle_websocket(mut socket: WebSocket, state: AppState) -> AppResu
                     if let Ok(json) = serde_json::to_string(&response) {
                         socket.send(Message::Text(json)).await.ok();
                     }
-                    info!("Emitted {} segments across {} speakers", emitted_segments, clusterer.num_speakers());
+                    info!(
+                        "Emitted {} segments across {} speakers",
+                        emitted_segments,
+                        clusterer.num_speakers()
+                    );
                     break;
                 }
                 Err(e) => {

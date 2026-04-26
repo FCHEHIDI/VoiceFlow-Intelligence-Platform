@@ -3,7 +3,10 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use tokio::signal;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, Level};
@@ -28,8 +31,8 @@ async fn main() -> anyhow::Result<()> {
 
     setup_metrics();
 
-    let models_dir = std::env::var("MODELS_DIR")
-        .unwrap_or_else(|_| "../voiceflow-ml/models".to_string());
+    let models_dir =
+        std::env::var("MODELS_DIR").unwrap_or_else(|_| "../voiceflow-ml/models".to_string());
     info!("Using models directory: {}", models_dir);
 
     let model_manager = Arc::new(ModelManager::new(&models_dir).await?);
@@ -63,7 +66,9 @@ async fn root() -> &'static str {
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]

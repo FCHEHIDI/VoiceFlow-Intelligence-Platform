@@ -34,6 +34,11 @@ resource "aws_vpc" "this" {
   }
 }
 
+# nosemgrep: terraform.aws.security.aws-subnet-has-public-ip-address.aws-subnet-has-public-ip-address
+# Public subnets host the public-facing ALB and NAT gateways; they intentionally
+# auto-assign public IPv4s. Application workloads (ECS tasks, RDS, Redis) live in
+# the `private` and `db` subnets defined below which do not auto-assign public
+# IPs.
 resource "aws_subnet" "public" {
   count = 2
 

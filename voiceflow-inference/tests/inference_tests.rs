@@ -51,7 +51,11 @@ mod sliding_window_tests {
         let audio = fake_audio(10.0);
         let windows = sliding_window(&audio, 3.0, 1.0, SAMPLE_RATE);
 
-        assert_eq!(windows.len(), 8, "expected 8 full 3 s windows in 10 s audio");
+        assert_eq!(
+            windows.len(),
+            8,
+            "expected 8 full 3 s windows in 10 s audio"
+        );
 
         for (i, (start, end, samples)) in windows.iter().enumerate() {
             let expected_start = i as f64;
@@ -127,7 +131,10 @@ mod clustering_tests {
         let id1 = clusterer.add_embedding_at(emb.clone(), 0.0, 1.0);
         let id2 = clusterer.add_embedding_at(emb.clone(), 1.0, 2.0);
 
-        assert_eq!(id1, id2, "identical embeddings should map to the same speaker");
+        assert_eq!(
+            id1, id2,
+            "identical embeddings should map to the same speaker"
+        );
         assert_eq!(clusterer.num_speakers(), 1);
 
         let segments = clusterer.get_segments();

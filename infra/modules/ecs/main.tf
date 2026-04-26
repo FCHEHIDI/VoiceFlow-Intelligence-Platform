@@ -327,7 +327,12 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# When no TLS: HTTP (80) is the routing listener (dev-only fallback).
+# nosemgrep: terraform.aws.security.insecure-load-balancer-tls-version.insecure-load-balancer-tls-version
+# Dev-only fallback: when no ACM cert is provided (var.acm_certificate_arn = "")
+# we expose an HTTP listener so engineers can hit the ALB without TLS. In every
+# environment with `has_tls = true` (staging/prod) this resource has count = 0
+# and the routing listener is the HTTPS one above, which uses
+# ELBSecurityPolicy-TLS13-1-2-2021-06.
 resource "aws_lb_listener" "http_route" {
   count = local.has_tls ? 0 : 1
 

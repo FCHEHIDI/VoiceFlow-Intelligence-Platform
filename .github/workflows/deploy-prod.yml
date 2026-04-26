@@ -24,10 +24,16 @@ jobs:
     if: ${{ github.event.inputs.confirm == 'DEPLOY' }}
     runs-on: ubuntu-latest
     steps:
+      # We pipe `github.event.inputs.image_tag` through `env:` to avoid the
+      # `run-shell-injection` finding from semgrep — the variable is treated as
+      # untrusted user input and must never be interpolated directly into a
+      # shell script.
       - name: Confirm deployment intent
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         run: |
           echo "Confirmation accepted."
-          echo "Deploying image_tag='${{ github.event.inputs.image_tag }}' to production cluster voiceflow-prod"
+          echo "Deploying image_tag='${IMAGE_TAG}' to production cluster voiceflow-prod"
 
   deploy:
     name: Deploy to ECS production

@@ -39,7 +39,7 @@ pub struct ModelConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceConfig {
     pub num_threads: usize,
-    pub optimization_level: String,  // Level1, Level2, Level3
+    pub optimization_level: String, // Level1, Level2, Level3
 }
 
 impl Config {

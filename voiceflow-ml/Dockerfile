@@ -24,15 +24,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create necessary directories
+# Create necessary directories with permissions for the non-root runtime user.
 RUN mkdir -p /models /data /logs
 
-# Expose port
+# Drop root: a dedicated UID:GID owns /app and the writable mount points.
+ARG APP_UID=10001
+ARG APP_GID=10001
+RUN groupadd --system --gid ${APP_GID} app \
+    && useradd --system --uid ${APP_UID} --gid ${APP_GID} --home-dir /app --shell /usr/sbin/nologin app \
+    && chown -R app:app /app /models /data /logs
+USER app:app
+
 EXPOSE 8000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health')"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)"
 
-# Run application
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

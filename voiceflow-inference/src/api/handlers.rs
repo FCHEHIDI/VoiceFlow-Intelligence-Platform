@@ -1,7 +1,10 @@
 //! HTTP API handlers for Axum.
 
 use axum::{
-    extract::{ws::{WebSocket, WebSocketUpgrade}, State},
+    extract::{
+        ws::{WebSocket, WebSocketUpgrade},
+        State,
+    },
     response::{IntoResponse, Response},
     Json,
 };
@@ -13,7 +16,9 @@ use crate::error::{AppError, AppResult};
 use crate::metrics::{
     gather_metrics, INFERENCE_ERRORS_TOTAL, INFERENCE_REQUESTS_TOTAL, WEBSOCKET_CONNECTIONS_ACTIVE,
 };
-use crate::streaming::{clustering::OnlineClusterer, handle_websocket, sliding_window::sliding_window};
+use crate::streaming::{
+    clustering::OnlineClusterer, handle_websocket, sliding_window::sliding_window,
+};
 use crate::AppState;
 
 /// Health check endpoint
@@ -86,11 +91,15 @@ pub async fn inference_handler(
 
     if request.audio.is_empty() {
         INFERENCE_ERRORS_TOTAL.inc();
-        return Err(AppError::InvalidInput("audio must be non-empty".to_string()));
+        return Err(AppError::InvalidInput(
+            "audio must be non-empty".to_string(),
+        ));
     }
     if request.sample_rate == 0 {
         INFERENCE_ERRORS_TOTAL.inc();
-        return Err(AppError::InvalidInput("sample_rate must be > 0".to_string()));
+        return Err(AppError::InvalidInput(
+            "sample_rate must be > 0".to_string(),
+        ));
     }
 
     info!(
@@ -129,7 +138,12 @@ pub async fn inference_handler(
 
     let total_speakers = clusterer.num_speakers();
     let latency_ms = start.elapsed().as_millis() as u64;
-    info!("Inference completed in {}ms ({} segments, {} speakers)", latency_ms, segments.len(), total_speakers);
+    info!(
+        "Inference completed in {}ms ({} segments, {} speakers)",
+        latency_ms,
+        segments.len(),
+        total_speakers
+    );
 
     Ok(Json(InferenceResponse {
         segments,
@@ -145,10 +159,7 @@ pub async fn metrics_handler() -> String {
 }
 
 /// WebSocket handler
-pub async fn websocket_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> Response {
+pub async fn websocket_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_websocket_connection(socket, state))
 }
 

@@ -22,26 +22,29 @@ RUN cargo build --release --locked
 # Runtime stage
 FROM debian:bookworm-slim
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl3 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl3 \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy binary from builder
 COPY --from=builder /app/target/release/voiceflow_inference /usr/local/bin/
 
-# Create directories
 RUN mkdir -p /models /logs
 
-# Expose port
+# Drop root: dedicated UID:GID owns /app, /models, /logs.
+ARG APP_UID=10001
+ARG APP_GID=10001
+RUN groupadd --system --gid ${APP_GID} app \
+    && useradd --system --uid ${APP_UID} --gid ${APP_GID} --home-dir /app --shell /usr/sbin/nologin app \
+    && chown -R app:app /app /models /logs
+USER app:app
+
 EXPOSE 3000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
-# Run application
 CMD ["voiceflow_inference"]
