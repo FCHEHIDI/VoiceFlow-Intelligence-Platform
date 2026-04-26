@@ -71,6 +71,8 @@ test_audio_f32.bin
 *.bin
 *.wav
 !tests/fixtures/audio/*.wav
+tests/fixtures/audio/*.tar.bz2
+tests/fixtures/audio/opensource_downloads/
 
 # Model checkpoints
 models/checkpoints/*.pth
