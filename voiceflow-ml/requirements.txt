@@ -21,7 +21,9 @@ redis==5.0.1
 celery[redis]>=5.3.4
 
 # HTTP Client
-httpx>=0.27.0
+# Pin httpx<0.28 because Starlette's TestClient still calls
+# `Client.__init__(app=...)` positionally, which httpx >= 0.28 removed.
+httpx>=0.27.0,<0.28.0
 requests==2.31.0
 
 # Auth & Security

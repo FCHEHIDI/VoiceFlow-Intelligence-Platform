@@ -45,6 +45,9 @@
 ### 1.3 Local environment quirks discovered
 - Host port `5432` (Postgres) is taken by a native Windows install →
   Docker compose remaps to `55432`. Same with Redis on `56379`.
+- During the live test we used a throwaway local password literally typed
+  in the shell (`<your-local-postgres-password>` placeholder above). NEVER
+  hard-code it in committed files; CI gitleaks will block the push.
 - Docker Desktop is unstable on this machine — restart it if `docker ps`
   hangs; otherwise prefer running services natively.
 - The committed `*.onnx` is a **stub** (synthetic). DO NOT benchmark
@@ -140,12 +143,12 @@ docker ps
 # 2. Bring up Postgres + Redis (ports 55432/56379, see CHECKPOINT § 1.3)
 docker compose up -d postgres redis
 
-# 3. Set the test secrets
-$env:JWT_SECRET_KEY     = "dev-jwt-secret-must-be-at-least-32-chars-long-xxx"
-$env:POSTGRES_PASSWORD  = "livetest_pwd_2026"
+# 3. Set the test secrets (use any local dev values; do NOT commit real ones)
+$env:JWT_SECRET_KEY     = "<your-dev-jwt-secret-min-32-chars>"
+$env:POSTGRES_PASSWORD  = "<your-local-postgres-password>"
 $env:REDIS_HOST         = "localhost"
 $env:REDIS_PORT         = "56379"
-$env:DATABASE_URL       = "postgresql+psycopg2://voiceflow:livetest_pwd_2026@localhost:55432/voiceflow"
+$env:DATABASE_URL       = "postgresql+psycopg2://voiceflow:<your-local-postgres-password>@localhost:55432/voiceflow"
 $env:RUST_INFERENCE_URL = "http://localhost:3000"
 
 # 4. Start the Rust engine (release build; uses the stub ONNX for now)

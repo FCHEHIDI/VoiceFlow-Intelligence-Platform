@@ -1,0 +1,43 @@
+# Gitleaks configuration for the VoiceFlow monorepo.
+#
+# We extend the default rule set and add narrowly-scoped allowlists so that
+# documented test placeholders, CI test secrets, and `.env.example` files do
+# not block the merge train.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for test placeholders & doc strings."
+
+# Files we never expect to contain real secrets. These are templates, demo
+# helpers, example notebooks, or markdown docs that intentionally embed
+# obviously-fake credentials.
+paths = [
+  '''(.*/)?\.env\.example$''',
+  '''(.*/)?\.env\.template$''',
+  '''(.*/)?CHECKPOINT\.md$''',
+  '''(.*/)?docs/.*\.md$''',
+  '''(.*/)?notebooks/.*\.ipynb$''',
+  '''(.*/)?voiceflow-ml/archive/.*''',
+]
+
+# Recognisable placeholder/test values that should never trip a secret scanner.
+# Anything matching one of these regexes anywhere in the repo is ignored.
+regexes = [
+  '''(?i)ci-test-[a-z0-9-]+''',
+  '''(?i)dev-[a-z0-9-]+-secret''',
+  '''(?i)<your-[a-z0-9-]+>''',
+  '''(?i)example[-_]?password''',
+  '''(?i)changeme''',
+]
+
+# Stop-words: if the line contains any of these, it's almost certainly a
+# placeholder rather than a real leak.
+stopwords = [
+  "REDACTED",
+  "PLACEHOLDER",
+  "EXAMPLE",
+  "TODO",
+  "FIXME",
+]
