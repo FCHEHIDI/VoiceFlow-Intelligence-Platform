@@ -30,11 +30,10 @@ locals {
   })
 }
 
-# nosemgrep: terraform.aws.security.aws-ecr-mutable-image-tags.aws-ecr-mutable-image-tags
-# `image_tag_mutability` is wired through a variable so the dev environment can
-# use MUTABLE (faster iteration) while prod hard-pins IMMUTABLE (see
-# infra/environments/prod/main.tf). The semgrep rule cannot statically resolve
-# this and would otherwise block CI for both environments.
+# `image_tag_mutability` is wired through a variable: dev uses MUTABLE for
+# faster iteration; prod hard-pins IMMUTABLE in environments/prod/main.tf.
+# This file is allow-listed in .semgrepignore — semgrep cannot statically
+# resolve the variable and would otherwise block CI on the dev path.
 resource "aws_ecr_repository" "this" {
   for_each = local.repos
 
