@@ -11,6 +11,10 @@ from api.middleware.input_validation import content_length_middleware
 from core import settings, configure_logging, init_db, check_db_connection, close_redis
 from api.routes import health, models as models_routes, inference
 
+# Ensure ORM models are registered with `Base.metadata` before `init_db()` is
+# called during the lifespan startup; otherwise tables would not be created.
+from repositories import job_repository as _register_job_models  # noqa: F401
+
 # Configure logging — JSON in production, console renderer otherwise.
 configure_logging(env=settings.app_env, debug=settings.debug)
 logger = structlog.get_logger()

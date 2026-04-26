@@ -2,7 +2,7 @@
 Database connection and session management using SQLAlchemy.
 """
 
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine, MetaData, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
@@ -82,10 +82,10 @@ def init_db() -> None:
 
 
 def check_db_connection() -> bool:
-    """Check if database connection is alive."""
+    """Check if database connection is alive (SQLAlchemy 2.x compatible)."""
     try:
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         logger.error("database_connection_failed", error=str(e))
