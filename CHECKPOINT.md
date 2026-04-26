@@ -111,6 +111,17 @@ security gates we actually rely on.
   (`AWS_CI_ROLE_ARN`, `ECR_ML_URL`, `ECR_INFERENCE_URL`,
   `STAGING_ALB_URL`). That's expected and orthogonal to "fix CI" — see § 4.
 
+### 2.4 Final state confirmed at 2026-04-26 02:42 (UTC+2)
+The CI fix took 3 commits (the first attempt missed two CI quirks):
+- `e2fd8ba` — workflows + Dockerfiles + Terraform suppressions + cargo fmt
+- `6282234` — pin `httpx<0.28` (Starlette TestClient compat) + `.gitleaks.toml`
+- `3dd752f` — allow-list the 3 Terraform modules in `.semgrepignore` (semgrep
+  `# nosemgrep` doesn't apply cleanly at the HCL resource-block level)
+
+CI run `24944456226` on `main` is **green** with all three quality gates
+passing in 2 min 5 s. Deploy Staging fails at the AWS-OIDC step as expected
+(see § 2.3); that's the next milestone, not a regression.
+
 ---
 
 ## 3. Outstanding tech debt (low-priority)
